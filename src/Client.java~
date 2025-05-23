@@ -1,0 +1,112 @@
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.net.Socket;
+import java.security.spec.RSAOtherPrimeInfo;
+import java.util.Scanner;
+
+public class Client {
+    private Socket socket;
+    private ObjectOutputStream out;
+    private ObjectInputStream in;
+    private boolean isNameAccepted;
+    private String clientName;
+    private final Scanner scanner;
+
+    Client(Socket socket) {
+        this.socket = socket;
+        this.scanner = new Scanner(System.in);
+        try {
+            out = new ObjectOutputStream(this.socket.getOutputStream());
+            out.flush();
+            in = new ObjectInputStream(this.socket.getInputStream());
+            new Thread(() -> listenForMessages()).start();
+        } catch (IOException e) {
+            System.out.println("Error getting the streams: " + e.getMessage());
+            closeConnection();
+        }
+    }
+
+    private void listenForMessages() {
+        try {
+            while (true) {
+                Object message = in.readObject();
+                if (message instanceof String) {
+                    String text = (String) message;
+                    if (text.startsWith("SUBMITCLIENTNAME")) {
+                        System.out.print("Enter your name: ");
+                        String name = scanner.nextLine().trim();
+                        if (name.isEmpty()) {
+                            System.out.println("Name cannot be empty. Try again.");
+                            continue;
+                        }
+                        out.writeObject(name);
+                        out.flush();
+                        clientName = name;
+                    } else if (text.startsWith("NAMEACCEPTED")) {
+                        isNameAccepted = true;
+                        System.out.println("Connected to the server successfully as " + clientName);
+                        new Thread(() -> sendMessage()).start(); // we can start sending messags
+                    } else if (text.startsWith("TEXT")) {
+                        if (text.contains("EXIT")){
+                            closeConnection();
+                        }
+                        String messageContent = text.substring(5);
+                        String displayText = messageContent.startsWith(clientName + ": ")
+                                ? "": messageContent;
+                        synchronized (System.out) {
+                            System.out.println("\r" + displayText);
+                            System.out.print("you : ");
+                            System.out.flush();
+                        }
+                    }
+                }
+            }
+        } catch (IOException | ClassNotFoundException e) {
+            System.out.println("Disconnected from server: " + e.getMessage());
+        } finally {
+            closeConnection();
+        }
+    }
+
+    private void sendMessage() {
+        while (isNameAccepted) {
+            String message = scanner.nextLine().trim();
+            if (message.isEmpty()) {
+                synchronized (System.out) {
+                    System.out.print("you : ");
+                    System.out.flush();
+                }
+                continue;
+            }
+            try {
+                out.writeObject(message);
+                out.flush();
+            } catch (IOException e) {
+                System.out.println("Error sending message: " + e.getMessage());
+                break;
+            }
+        }
+    }
+
+    private void closeConnection() {
+        try {
+            if (out != null) out.close();
+            if (in != null) in.close();
+            if (socket != null) socket.close();
+            System.out.println("you have disconnected...");
+        } catch (IOException e) {
+        } finally {
+            scanner.close();
+        }
+    }
+
+    public static void main(String[] args) {
+        try {
+            Socket socket = new Socket("localhost", 5000);
+            Client client = new Client(socket);
+        } catch (IOException e) {
+            System.out.println("Error connecting to server: " + e.getMessage());
+        }
+    }
+}
